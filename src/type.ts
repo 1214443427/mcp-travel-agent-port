@@ -369,6 +369,19 @@ export const BookingApiResponseSchema = z.object({
   data: z.httpUrl(),
 });
 
+export const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  passportCountry: z.string().describe("ISO country code. e.g. GB"),
+  homeAirport: z.string().describe("IATA airport code. e.g. LHR"),
+  budgetPerDay: z.number().positive(),
+  currency: z.string(),
+  dietary: z.array(z.string()),
+  pace: z.enum(["relaxed", "moderate", "packed"]),
+});
+
+export type User = z.infer<typeof UserSchema>;
+
 export const HotelDetailsSchema = z.object({
   data: z.object({
     hotel_name: z.string(),
@@ -386,4 +399,44 @@ export const HotelDetailsSchema = z.object({
       }),
     ),
   }),
+});
+
+export const getFlightsParams = z.object({
+  departure: z.string().describe("Departure Airport's IATA code. Example: LAX"),
+  arrival: z.string().describe("The IATA code of the arrival airport. Example: JFK"),
+  departureDate: z.iso
+    .date()
+    .describe("The date of departure for the trip. /Use ISO date string, such as 2026-09-20"),
+  returningDate: z.iso
+    .date()
+    .describe("The date of return for round-trip flights. Use ISO date string, such as 2026-09-27"),
+  personCount: z.number().describe("The number of passengers."),
+  currency: z
+    .string()
+    .nullable()
+    .describe("Sets the currency for price formatting in the response. Eg. USD, CAD"),
+});
+
+export const getNextFlightParams = z.object({
+  ref: z.string().describe("The ref of a outbound flight obtained from the get_flights call."),
+  currency: z
+    .string()
+    .nullable()
+    .describe(
+      "Sets the currency for price formatting in the response. Allows ISO code. Defaults to USD",
+    ),
+});
+
+export const getHotelsParams = z.object({
+  lat: z.number().describe("The latitude of the city"),
+  lon: z.number().describe("The longitude of the city"),
+  person: z.number().describe("Number of person staying."),
+  checkInDate: z.iso.date().describe("The date to check in on. "),
+  checkOutDate: z.iso.date().describe("The date to check out on. "),
+  currencyCode: z
+    .string()
+    .nullable()
+    .describe(
+      "The currency to display the price in, in ISO format. e.g. USD, CAD, JPY. Defaults to USD",
+    ),
 });

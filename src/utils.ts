@@ -1,4 +1,5 @@
 import z from "zod";
+import { FlightSchema } from "./type.js";
 
 type QueryOptions = Record<string, string | number | boolean | undefined>;
 
