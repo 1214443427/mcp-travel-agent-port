@@ -413,7 +413,7 @@ export const getFlightsParams = z.object({
   personCount: z.number().describe("The number of passengers."),
   currency: z
     .string()
-    .nullable()
+    .default("USD")
     .describe("Sets the currency for price formatting in the response. Eg. USD, CAD"),
 });
 
@@ -421,7 +421,7 @@ export const getNextFlightParams = z.object({
   ref: z.string().describe("The ref of a outbound flight obtained from the get_flights call."),
   currency: z
     .string()
-    .nullable()
+    .default("USD")
     .describe(
       "Sets the currency for price formatting in the response. Allows ISO code. Defaults to USD",
     ),
@@ -435,7 +435,7 @@ export const getHotelsParams = z.object({
   checkOutDate: z.iso.date().describe("The date to check out on. "),
   currencyCode: z
     .string()
-    .nullable()
+    .default("USD")
     .describe(
       "The currency to display the price in, in ISO format. e.g. USD, CAD, JPY. Defaults to USD",
     ),

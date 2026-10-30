@@ -22,8 +22,10 @@ import {
   HotelsSchema,
   HotelHandle,
   PlacesSchema,
+  FlightDetailsSchema,
+  FlightDetails,
 } from "./type.js";
-import { GEOAPIFY_KEY, WEATHER_API_KEY } from "./config.js";
+import { GEOAPIFY_KEY, RAPID_API_KEY, WEATHER_API_KEY } from "./config.js";
 import { fetchAPI, fetchRapidAPI } from "./fetching.js";
 import { createMcpExpressApp, requireBearerAuth } from "@modelcontextprotocol/express";
 import { toNodeHandler } from "@modelcontextprotocol/node";
@@ -126,7 +128,7 @@ function createServer(ctx: McpRequestContext) {
       description: "Return the latitude and longitude of a city",
       inputSchema: z.object({
         city: z.string().describe("The name of the city to search for. "),
-        countryCode: z.string().nullable().describe("ISO country code. e.g. GB"),
+        countryCode: z.string().optional().describe("ISO country code. e.g. GB"),
       }),
     },
     async ({ city, countryCode }) => {
@@ -149,8 +151,8 @@ function createServer(ctx: McpRequestContext) {
         lat: z.number().describe("The latitude of the city"),
         lon: z.number().describe("The longitude of the city"),
         unit: z
-          .string()
-          .nullable()
+          .enum(["metric", "imperial"])
+          .default("metric")
           .describe(
             "Unit of measurement. 'metric' and 'imperial' units are available. Defaults to 'metric'.",
           ),
@@ -250,6 +252,66 @@ function createServer(ctx: McpRequestContext) {
       }
 
       return textResult(JSON.stringify(filteredFlights));
+    },
+  );
+
+  server.registerTool(
+    "get_booking_url",
+    {
+      title: "Get Booking URL",
+      description: "Get the booking URL using the book token reference.",
+      inputSchema: z.object({ ref: z.string() }),
+    },
+    async ({ ref }) => {
+      const handle = getHandle(ref, owner);
+      if (!handle) {
+        return errorResult(`Unknown ref ${ref}. Please select a different flight.`);
+      }
+      if (handle.kind != "booking") {
+        return errorResult(
+          `${ref} is not a booking token. Please use an entry from the result of get_next_flight tool.`,
+        );
+      }
+
+      const detailsURL = "https://google-flights2.p.rapidapi.com/api/v1/getBookingDetails";
+
+      const options = {
+        booking_token: handle.token,
+        currency: "USD",
+      };
+      const url = constructUrl(detailsURL, options);
+      const result = await fetchRapidAPI(url, "google-flights2.p.rapidapi.com");
+      const parsedData = parseData(FlightDetailsSchema, result);
+      const airlineOffering = parsedData.data.filter((entry) => entry.is_airline === true);
+      const responseBody: FlightDetails = {
+        data: airlineOffering.length > 0 ? airlineOffering : parsedData.data,
+      };
+
+      const bookUrl = "https://google-flights2.p.rapidapi.com/api/v1/getBookingURL";
+      const bookOptions = {
+        method: "POST",
+        headers: {
+          "x-rapidapi-key": RAPID_API_KEY,
+          "x-rapidapi-host": "google-flights2.p.rapidapi.com",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          token: responseBody.data[0].token,
+        }),
+        signal: AbortSignal.timeout(10_000),
+      };
+      let response;
+      try {
+        response = await fetch(bookUrl, bookOptions);
+      } catch (error) {
+        console.error(error);
+        throw new Error(
+          "Failed to fetch booking URL. Ask the user to book directly from the airline.",
+        );
+      }
+      const data = await response.json();
+
+      return textResult(JSON.stringify(data.data));
     },
   );
 
@@ -402,18 +464,19 @@ function createServer(ctx: McpRequestContext) {
       description: "Asks the model to draft a short itinerary",
       argsSchema: z.object({
         destination: z.string(),
+        from: z.string(),
         startDate: z.string(),
         endDate: z.string(),
         budget: z.coerce.number().describe("Budget in USD"),
       }),
     },
-    ({ destination, startDate, endDate, budget }) => ({
+    ({ destination, from, startDate, endDate, budget }) => ({
       messages: [
         {
           role: "user",
           content: {
             type: "text",
-            text: `System Prompt: You are a helpful travel planner. You will plan the user's trip in plain text format. You response will include "events", which include weather, transportation, accommodations, and tourist activities. Separate them out into text blocks. User Prompt: The user is planning a trip to ${destination} on ${startDate}. They plan to return on ${endDate}. Their budget is ${budget}`,
+            text: `System Prompt: You are a helpful travel planner. You will plan the user's trip in plain text format. You response will include "events", which include weather, transportation, accommodations, and tourist activities. Separate them out into text blocks. User Prompt: The user is planning a trip from ${from} to ${destination} on ${startDate}. They plan to return on ${endDate}. Their budget is ${budget}`,
           },
         },
       ],
@@ -424,28 +487,28 @@ function createServer(ctx: McpRequestContext) {
 
 // --- Fake Auth --------------------------------------------------------------
 
-// const devTokens: Record<string, string> = { "dev-u1": "u1", "dev-u2": "u2" };
+const devTokens: Record<string, string> = { "dev-u1": "u1", "dev-u2": "u2" };
 
-// const verifier: OAuthTokenVerifier = {
-//   async verifyAccessToken(token) {
-//     const userId = devTokens[token];
-//     if (!userId) throw new OAuthError(OAuthErrorCode.InvalidToken, "Unknown token");
-//     return {
-//       token,
-//       clientId: "dev",
-//       scopes: [],
-//       expiresAt: Math.floor(Date.now() / 1000) + 3600, // required, or the token is rejected
-//       extra: { userId },
-//     };
-//   },
-// };
+const verifier: OAuthTokenVerifier = {
+  async verifyAccessToken(token) {
+    const userId = devTokens[token];
+    if (!userId) throw new OAuthError(OAuthErrorCode.InvalidToken, "Unknown token");
+    return {
+      token,
+      clientId: "dev",
+      scopes: [],
+      expiresAt: Math.floor(Date.now() / 1000) + 3600, // required, or the token is rejected
+      extra: { userId },
+    };
+  },
+};
 
 // --- Start -----------------------------------------------------------------
 
 const app = createMcpExpressApp();
 const handler = toNodeHandler(createMcpHandler((ctx) => createServer(ctx)));
 
-app.all("/mcp", (req, res) => handler(req, res, req.body));
+app.all("/mcp", requireBearerAuth({ verifier }), (req, res) => handler(req, res, req.body));
 app.use("/api/users", usersRouter);
 
 const PORT = Number(process.env.PORT) || 3000;
